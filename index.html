@@ -76,6 +76,14 @@ button {
 .weekly-table th, .weekly-table td { border: 1px solid #eaeaea; padding:6px; vertical-align: top; }
 .weekly-table th { background:#f8f8f8; }
 
+/* Reminder card UI */
+.reminder-header { display:flex; align-items:center; gap:8px; }
+.reminder-actions { margin-left: auto; display:flex; gap:6px; }
+.reminder-textarea { width:100%; box-sizing:border-box; min-height:64px; margin-top:6px; }
+.reminder-input { width:60%; }
+.btn-danger { background:#dc3545; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
+.btn-primary { background:#007bff; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
+
 /* Modal for editing a day */
 .modal {
   position: fixed;
@@ -285,16 +293,19 @@ async function loadReminders() {
     const tag = `<span class="tag ${r.type}">${r.type === "preview" ? "予習" : "復習"}</span>`;
 
     div.innerHTML = `
-      <div>
-        <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
-        <input id="title_${r.id}" value="${escapeHtml(r.title)}" style="width:60%">
-        <button class="small-btn" onclick="saveTitle('${r.id}')">保存</button>
-        ${tag}
-      </div>
+        <div class="reminder-header">
+          <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
+          <input id="title_${r.id}" class="reminder-input" value="${escapeHtml(r.title)}">
+          <div class="reminder-actions">
+            <button class="small-btn btn-primary" onclick="saveTitle('${r.id}')">保存</button>
+            <button class="small-btn btn-danger" onclick="deleteReminder('${r.id}')">削除</button>
+          </div>
+          ${tag}
+        </div>
       <div><small>${new Date(r.due_date).toLocaleString()}</small></div>
       <div>
-        <textarea id="memo_${r.id}" placeholder="メモ" style="width:100%">${escapeHtml(r.memo || "")}</textarea>
-        <button class="small-btn" onclick="saveMemo('${r.id}')">メモ保存</button>
+        <textarea id="memo_${r.id}" class="reminder-textarea" placeholder="メモ">${escapeHtml(r.memo || "")}</textarea>
+        <div style="display:flex;justify-content:flex-end"><button class="small-btn btn-primary" onclick="saveMemo('${r.id}')">メモ保存</button></div>
       </div>
     `;
 
@@ -323,6 +334,13 @@ async function saveMemo(id) {
   await supabaseClient.from('reminders').update({ memo }).eq('id', id);
   const btn = document.querySelector('#reminder_list button.small-btn');
   loadReminders();
+}
+
+async function deleteReminder(id) {
+  if (!confirm('このリマインダーを削除しますか？')) return;
+  const { error } = await supabaseClient.from('reminders').delete().eq('id', id);
+  if (error) { alert('削除エラー: ' + error.message); return; }
+  await loadReminders();
 }
 
 // --- 生成トリガー制御 ---
