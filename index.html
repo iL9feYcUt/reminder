@@ -293,19 +293,29 @@ async function loadReminders() {
     const tag = `<span class="tag ${r.type}">${r.type === "preview" ? "予習" : "復習"}</span>`;
 
     div.innerHTML = `
-        <div class="reminder-header">
-          <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
-          <input id="title_${r.id}" class="reminder-input" value="${escapeHtml(r.title)}">
-          <div class="reminder-actions">
-            <button class="small-btn btn-primary" onclick="saveTitle('${r.id}')">保存</button>
-            <button class="small-btn btn-danger" onclick="deleteReminder('${r.id}')">削除</button>
-          </div>
-          ${tag}
+      <div class="reminder-header">
+        <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
+        <div id="title_view_${r.id}" style="flex:1;">
+          <span id="title_text_${r.id}">${escapeHtml(r.title)}</span>
+          <input id="title_input_${r.id}" class="reminder-input" style="display:none;" value="${escapeHtml(r.title)}">
         </div>
+        <div class="reminder-actions">
+          <button class="small-btn btn-primary" id="edit_btn_${r.id}" onclick="enableEdit('${r.id}')">編集</button>
+          <button class="small-btn btn-primary" id="save_btn_${r.id}" style="display:none" onclick="saveTitle('${r.id}')">保存</button>
+          <button class="small-btn" id="cancel_btn_${r.id}" style="display:none" onclick="cancelEdit('${r.id}')">キャンセル</button>
+          <button class="small-btn btn-danger" onclick="deleteReminder('${r.id}')">削除</button>
+        </div>
+        ${tag}
+      </div>
       <div><small>${new Date(r.due_date).toLocaleString()}</small></div>
       <div>
-        <textarea id="memo_${r.id}" class="reminder-textarea" placeholder="メモ">${escapeHtml(r.memo || "")}</textarea>
-        <div style="display:flex;justify-content:flex-end"><button class="small-btn btn-primary" onclick="saveMemo('${r.id}')">メモ保存</button></div>
+        <div id="memo_view_${r.id}">${escapeHtml(r.memo || '')}</div>
+        <textarea id="memo_input_${r.id}" class="reminder-textarea" style="display:none">${escapeHtml(r.memo || '')}</textarea>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="small-btn btn-primary" id="edit_memo_btn_${r.id}" onclick="enableMemoEdit('${r.id}')">メモ編集</button>
+          <button class="small-btn btn-primary" id="save_memo_btn_${r.id}" style="display:none" onclick="saveMemo('${r.id}')">メモ保存</button>
+          <button class="small-btn" id="cancel_memo_btn_${r.id}" style="display:none" onclick="cancelMemoEdit('${r.id}')">キャンセル</button>
+        </div>
       </div>
     `;
 
@@ -319,21 +329,71 @@ function escapeHtml(text) {
 }
 
 async function saveTitle(id) {
-  const el = document.getElementById('title_' + id);
+  const el = document.getElementById('title_input_' + id);
   if (!el) return;
   const title = el.value.trim();
   if (!title) { alert('タイトルは必須です'); return; }
   await supabaseClient.from('reminders').update({ title }).eq('id', id);
-  loadReminders();
+  // update UI
+  document.getElementById('title_text_' + id).textContent = title;
+  cancelEdit(id);
 }
 
 async function saveMemo(id) {
-  const el = document.getElementById('memo_' + id);
+  const el = document.getElementById('memo_input_' + id);
   if (!el) return;
   const memo = el.value;
   await supabaseClient.from('reminders').update({ memo }).eq('id', id);
-  const btn = document.querySelector('#reminder_list button.small-btn');
-  loadReminders();
+  document.getElementById('memo_view_' + id).textContent = memo;
+  cancelMemoEdit(id);
+}
+
+function enableEdit(id) {
+  document.getElementById('title_text_' + id).style.display = 'none';
+  document.getElementById('title_input_' + id).style.display = 'inline-block';
+  document.getElementById('edit_btn_' + id).style.display = 'none';
+  document.getElementById('save_btn_' + id).style.display = 'inline-block';
+  document.getElementById('cancel_btn_' + id).style.display = 'inline-block';
+}
+
+function cancelEdit(id) {
+  const input = document.getElementById('title_input_' + id);
+  const text = document.getElementById('title_text_' + id);
+  if (input && text) {
+    input.value = text.textContent;
+    input.style.display = 'none';
+    text.style.display = 'inline';
+  }
+  const editBtn = document.getElementById('edit_btn_' + id);
+  const saveBtn = document.getElementById('save_btn_' + id);
+  const cancelBtn = document.getElementById('cancel_btn_' + id);
+  if (editBtn) editBtn.style.display = 'inline-block';
+  if (saveBtn) saveBtn.style.display = 'none';
+  if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+function enableMemoEdit(id) {
+  document.getElementById('memo_view_' + id).style.display = 'none';
+  document.getElementById('memo_input_' + id).style.display = 'block';
+  document.getElementById('edit_memo_btn_' + id).style.display = 'none';
+  document.getElementById('save_memo_btn_' + id).style.display = 'inline-block';
+  document.getElementById('cancel_memo_btn_' + id).style.display = 'inline-block';
+}
+
+function cancelMemoEdit(id) {
+  const view = document.getElementById('memo_view_' + id);
+  const input = document.getElementById('memo_input_' + id);
+  if (view && input) {
+    input.value = view.textContent;
+    input.style.display = 'none';
+    view.style.display = 'block';
+  }
+  const editBtn = document.getElementById('edit_memo_btn_' + id);
+  const saveBtn = document.getElementById('save_memo_btn_' + id);
+  const cancelBtn = document.getElementById('cancel_memo_btn_' + id);
+  if (editBtn) editBtn.style.display = 'inline-block';
+  if (saveBtn) saveBtn.style.display = 'none';
+  if (cancelBtn) cancelBtn.style.display = 'none';
 }
 
 async function deleteReminder(id) {
