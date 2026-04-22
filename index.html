@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>学習管理アプリ</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+
+<style>
+body {
+  font-family: sans-serif;
+  margin: 0;
+  background: #f5f5f5;
+}
+
+header {
+  display: flex;
+  justify-content: space-around;
+  background: #fff;
+  border-bottom: 1px solid #ccc;
+}
+
+.tab {
+  padding: 12px;
+  cursor: pointer;
+}
+
+.active {
+  border-bottom: 2px solid blue;
+}
+
+.container {
+  padding: 10px;
+}
+
+.card {
+  background: white;
+  padding: 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+}
+
+.completed {
+  opacity: 0.4;
+}
+
+.tag {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-left: 6px;
+}
+
+.preview { background: #d0ebff; }
+.review { background: #ffd6d6; }
+
+button {
+  margin-top: 5px;
+}
+
+/* Form styling */
+.card input, .card select, .card button, .card textarea {
+  margin: 6px 4px 0 0;
+}
+
+/* Calendar table */
+.calendar-table { width: 100%; border-collapse: collapse; }
+.calendar-table th, .calendar-table td { border: 1px solid #e0e0e0; vertical-align: top; padding: 6px; height: 100px; }
+.calendar-table th { background: #fafafa; }
+.calendar-day-number { font-weight: bold; margin-bottom: 4px; }
+.calendar-holiday { color: #c00; font-weight: bold; }
+.calendar-empty { background: #f9f9f9; color: #aaa; }
+
+.weekly-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+.weekly-table th, .weekly-table td { border: 1px solid #eaeaea; padding:6px; vertical-align: top; }
+.weekly-table th { background:#f8f8f8; }
+
+/* Modal for editing a day */
+.modal {
+  position: fixed;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal .card { width: 90%; max-width: 600px; max-height: 80%; overflow:auto; }
+.small-btn { font-size:12px; padding:4px 6px; margin-left:6px; }
+
+/* Floating add button */
+.fab {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  z-index: 30;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  header { font-size: 14px; }
+  .card { padding: 8px; }
+  .card input, .card select { width: 100%; box-sizing: border-box; }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="tab active" onclick="switchTab('reminder', this)">リマインダー</div>
+  <div class="tab" onclick="switchTab('calendar', this)">カレンダー</div>
+</header>
+
+<div id="reminder" class="container">
+  <div class="card">
+    <button id="gen_now_btn" onclick="runGenerateNow()">今すぐリマインダー生成</button>
+    <label style="margin-left:8px"><input id="auto_generate_chk" type="checkbox" onchange="toggleAutoGenerate(this.checked)"> 自動生成</label>
+    <input id="auto_interval" type="number" min="1" value="60" style="width:80px;margin-left:6px"> 分ごと
+    <span id="gen_status" style="margin-left:12px;color:#444"></span>
+  </div>
+
+  <div id="reminder_list"></div>
+</div>
+<div id="calendar" class="container" style="display:none">
+  <div id="calendar_admin" style="display:none">
+  <div class="card">
+    <b>授業期間登録</b>
+    <div>
+      <input id="term_name" placeholder="名称">
+      <input id="term_start" type="date">
+      <input id="term_end" type="date">
+      <button onclick="addTerm()">追加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>休講日登録</b>
+    <div>
+      <input id="holiday_date" type="date">
+      <input id="holiday_reason" placeholder="理由">
+      <button onclick="addHoliday()">追加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>通常時間割（週次）登録</b>
+    <div>
+      <label>曜日</label>
+      <select id="weekly_day">
+        <option value="0">日</option>
+        <option value="1">月</option>
+        <option value="2">火</option>
+        <option value="3">水</option>
+        <option value="4">木</option>
+        <option value="5">金</option>
+        <option value="6">土</option>
+      </select>
+      <input id="weekly_period" type="number" placeholder="限（例:1）" min="1">
+      <input id="weekly_subject" placeholder="科目">
+      <input id="weekly_start" type="time">
+      <input id="weekly_end" type="time">
+      <button onclick="addWeekly()">追加</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <b>特別時間割（日付指定）登録</b>
+    <div>
+      <input id="special_date" type="date">
+      <input id="special_period" type="number" placeholder="限" min="1">
+      <input id="special_subject" placeholder="科目">
+      <input id="special_start" type="time">
+      <input id="special_end" type="time">
+      <button onclick="addSpecial()">追加</button>
+    </div>
+  </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div>
+        <button onclick="changeMonth(-1)">&lt;</button>
+        <button onclick="changeMonth(1)">&gt;</button>
+      </div>
+      <div id="calendar_label"></div>
+      <div>
+        <button onclick="toggleAdmin()">設定</button>
+      </div>
+    </div>
+    <div id="weekly_table" style="margin-bottom:8px"></div>
+    <div id="calendar_days"></div>
+  </div>
+</div>
+
+  <!-- Add reminder floating button and modal -->
+  <button id="add_reminder_btn" class="fab" onclick="openAddReminder()">＋</button>
+
+  <div id="add_reminder_modal" class="modal" style="display:none">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>リマインダー追加</h3>
+        <button onclick="closeAddReminder()">閉じる</button>
+      </div>
+      <div>
+        <div>タイトル<br><input id="add_title" style="width:100%"></div>
+        <div>科目（任意）<br><input id="add_subject" style="width:100%"></div>
+        <div>種別<br>
+          <select id="add_type">
+            <option value="preview">予習</option>
+            <option value="review">復習</option>
+          </select>
+        </div>
+        <div>期限（日時）<br><input id="add_due" type="datetime-local" style="width:100%"></div>
+        <div>メモ<br><textarea id="add_memo" style="width:100%"></textarea></div>
+        <div style="margin-top:8px"><button onclick="submitAddReminder()">追加</button></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SUPABASE_URL = "https://ipcgecwqswavxozmelku.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlwY2dlY3dxc3dhdnhvem1lbGt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTUzODUsImV4cCI6MjA5MjQzMTM4NX0.xIQPpVAWItAwhbACjA602MXvVPhx9yV52G3sAEXzWq0";
+
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+
+let currentTab = "reminder";
+
+function switchTab(tab, el) {
+  document.getElementById("reminder").style.display = "none";
+  document.getElementById("calendar").style.display = "none";
+
+  document.getElementById(tab).style.display = "block";
+
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  if (el && el.classList) el.classList.add("active");
+
+  currentTab = tab;
+
+  if (tab === "reminder") loadReminders();
+  if (tab === "calendar") loadCalendar();
+}
+
+async function generateReminders() {
+  return await supabaseClient.rpc("generate_reminders");
+}
+
+async function loadReminders() {
+  // Hide completed reminders that are past due by marking hidden=true
+  try {
+    await supabaseClient.from('reminders')
+      .update({ hidden: true })
+      .lt('due_date', new Date().toISOString())
+      .eq('completed', true)
+      .eq('hidden', false);
+  } catch (e) {
+    console.error('failed to mark expired completed as hidden', e);
+  }
+
+  const { data } = await supabaseClient
+    .from("reminders")
+    .select("*")
+    .neq('hidden', true)
+    .order("due_date", { ascending: true });
+
+  const container = document.getElementById("reminder_list");
+  container.innerHTML = "";
+
+  const now = new Date();
+
+  data.forEach(r => {
+    if (new Date(r.due_date) < now && r.completed) return;
+
+    const div = document.createElement("div");
+    div.className = "card " + (r.completed ? "completed" : "");
+    const tag = `<span class="tag ${r.type}">${r.type === "preview" ? "予習" : "復習"}</span>`;
+
+    div.innerHTML = `
+      <div>
+        <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
+        <input id="title_${r.id}" value="${escapeHtml(r.title)}" style="width:60%">
+        <button class="small-btn" onclick="saveTitle('${r.id}')">保存</button>
+        ${tag}
+      </div>
+      <div><small>${new Date(r.due_date).toLocaleString()}</small></div>
+      <div>
+        <textarea id="memo_${r.id}" placeholder="メモ" style="width:100%">${escapeHtml(r.memo || "")}</textarea>
+        <button class="small-btn" onclick="saveMemo('${r.id}')">メモ保存</button>
+      </div>
+    `;
+
+    container.appendChild(div);
+  });
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function saveTitle(id) {
+  const el = document.getElementById('title_' + id);
+  if (!el) return;
+  const title = el.value.trim();
+  if (!title) { alert('タイトルは必須です'); return; }
+  await supabaseClient.from('reminders').update({ title }).eq('id', id);
+  loadReminders();
+}
+
+async function saveMemo(id) {
+  const el = document.getElementById('memo_' + id);
+  if (!el) return;
+  const memo = el.value;
+  await supabaseClient.from('reminders').update({ memo }).eq('id', id);
+  const btn = document.querySelector('#reminder_list button.small-btn');
+  loadReminders();
+}
+
+// --- 生成トリガー制御 ---
+let autoGenIntervalId = null;
+
+async function runGenerateNow() {
+  const btn = document.getElementById('gen_now_btn');
+  const status = document.getElementById('gen_status');
+  btn.disabled = true;
+  status.textContent = '生成中...';
+  try {
+    const res = await generateReminders();
+    if (res && res.error) {
+      status.textContent = 'エラー: ' + res.error.message;
+    } else {
+      const t = new Date();
+      status.textContent = '最終実行: ' + t.toLocaleString();
+    }
+    await loadReminders();
+  } catch (e) {
+    status.textContent = '失敗: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function toggleAutoGenerate(checked) {
+  const status = document.getElementById('gen_status');
+  if (checked) {
+    const mins = parseInt(document.getElementById('auto_interval').value, 10) || 60;
+    // set interval in ms
+    autoGenIntervalId = setInterval(async () => {
+      try { await generateReminders(); await loadReminders(); }
+      catch (e) { console.error('auto generate failed', e); }
+    }, mins * 60 * 1000);
+    status.textContent = '自動生成: ON (' + mins + '分毎)';
+  } else {
+    if (autoGenIntervalId) { clearInterval(autoGenIntervalId); autoGenIntervalId = null; }
+    status.textContent = '自動生成: OFF';
+  }
+}
+
+async function toggleComplete(id, state) {
+  // update completed state
+  await supabaseClient.from("reminders")
+    .update({ completed: state })
+    .eq("id", id);
+
+  // if marked completed and already past due, mark hidden
+  if (state) {
+    const { data } = await supabaseClient.from('reminders').select('due_date').eq('id', id).single();
+    if (data && data.due_date) {
+      if (new Date(data.due_date) < new Date()) {
+        await supabaseClient.from('reminders').update({ hidden: true }).eq('id', id);
+      } else {
+        await supabaseClient.from('reminders').update({ hidden: false }).eq('id', id);
+      }
+    }
+  } else {
+    // un-complete: ensure visible
+    await supabaseClient.from('reminders').update({ hidden: false }).eq('id', id);
+  }
+
+  loadReminders();
+}
+
+async function updateMemo(id, memo) {
+  await supabaseClient.from("reminders")
+    .update({ memo: memo })
+    .eq("id", id);
+}
+
+async function addReminder() {
+  const title = prompt("タイトル");
+  if (!title) return;
+
+  await supabaseClient.from("reminders").insert({
+    title: title,
+    due_date: new Date().toISOString()
+  });
+
+  loadReminders();
+}
+
+// --- 管理用フォームからの追加処理 ---
+async function addTerm() {
+  const name = document.getElementById('term_name').value.trim();
+  const start_date = document.getElementById('term_start').value;
+  const end_date = document.getElementById('term_end').value;
+  if (!name || !start_date || !end_date) { alert('名称・開始日・終了日を入力してください'); return; }
+  await supabaseClient.from('terms').insert({ name, start_date, end_date });
+  alert('追加しました');
+}
+
+async function addHoliday() {
+  const date = document.getElementById('holiday_date').value;
+  const reason = document.getElementById('holiday_reason').value.trim();
+  if (!date) { alert('日付を入力してください'); return; }
+  const { error } = await supabaseClient.from('holidays').insert({ date, reason });
+  if (error) { alert('エラー: ' + error.message); return; }
+  alert('追加しました');
+  loadCalendar();
+}
+
+async function addWeekly() {
+  const day_of_week = parseInt(document.getElementById('weekly_day').value, 10);
+  const period = parseInt(document.getElementById('weekly_period').value, 10);
+  const subject = document.getElementById('weekly_subject').value.trim();
+  const start_time = document.getElementById('weekly_start').value || null;
+  const end_time = document.getElementById('weekly_end').value || null;
+  if (isNaN(day_of_week) || isNaN(period) || !subject) { alert('曜日・限・科目を入力してください'); return; }
+  const { error } = await supabaseClient.from('weekly_schedule').insert({ day_of_week, period, subject, start_time, end_time });
+  if (error) { alert('エラー: ' + error.message); return; }
+  alert('追加しました');
+}
+
+async function addSpecial() {
+  const date = document.getElementById('special_date').value;
+  const period = parseInt(document.getElementById('special_period').value, 10);
+  const subject = document.getElementById('special_subject').value.trim();
+  const start_time = document.getElementById('special_start').value || null;
+  const end_time = document.getElementById('special_end').value || null;
+  if (!date || isNaN(period) || !subject) { alert('日付・限・科目を入力してください'); return; }
+  const { error } = await supabaseClient.from('special_schedule').insert({ date, period, subject, start_time, end_time });
+  if (error) { alert('エラー: ' + error.message); return; }
+  alert('追加しました');
+  loadCalendar();
+}
+
+let calendarState = { year: null, month: null };
+
+function changeMonth(delta) {
+  if (!calendarState.year) {
+    const now = new Date();
+    calendarState.year = now.getFullYear();
+    calendarState.month = now.getMonth();
+  }
+  const d = new Date(calendarState.year, calendarState.month + delta, 1);
+  calendarState.year = d.getFullYear();
+  calendarState.month = d.getMonth();
+  loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function loadCalendar(year, month) {
+  const { data: special } = await supabaseClient.from("special_schedule").select("*");
+  const { data: weekly } = await supabaseClient.from("weekly_schedule").select("*");
+  const { data: holidays } = await supabaseClient.from("holidays").select("*");
+
+  const container = document.getElementById("calendar_days");
+  container.innerHTML = "";
+
+  const now = new Date();
+  if (typeof year === 'undefined' || typeof month === 'undefined') {
+    year = now.getFullYear();
+    month = now.getMonth();
+  }
+  calendarState.year = year; calendarState.month = month;
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+
+  document.getElementById('calendar_label').textContent = `${year}年 ${month + 1}月`;
+
+  const table = document.createElement('table');
+  table.className = 'calendar-table';
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  ['日','月','火','水','木','金','土'].forEach(h => { const th = document.createElement('th'); th.textContent = h; headerRow.appendChild(th); });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+
+  let startWeekday = firstDay.getDay();
+  let cur = new Date(year, month, 1 - startWeekday);
+
+  while (cur <= lastDay || cur.getDay() !== 0) {
+    const tr = document.createElement('tr');
+    for (let i = 0; i < 7; i++) {
+      const td = document.createElement('td');
+      const dateStr = cur.toISOString().split('T')[0];
+      const inMonth = cur.getMonth() === month;
+      const dayNum = cur.getDate();
+
+      if (!inMonth) td.classList.add('calendar-empty');
+
+      const numDiv = document.createElement('div');
+      numDiv.className = 'calendar-day-number';
+      numDiv.textContent = dayNum;
+      td.appendChild(numDiv);
+
+      // holiday?
+      const isHoliday = (holidays || []).find(h => h.date === dateStr);
+      if (isHoliday) {
+        const hdiv = document.createElement('div');
+        hdiv.className = 'calendar-holiday';
+        hdiv.textContent = isHoliday.reason || '休講';
+        td.appendChild(hdiv);
+        tr.appendChild(td);
+        cur.setDate(cur.getDate() + 1);
+        continue;
+      }
+
+      // special schedule first
+      const specialDay = (special || []).filter(s => s.date === dateStr);
+      if (specialDay.length) {
+        specialDay.forEach(s => {
+          const li = document.createElement('div');
+          li.textContent = `${s.period}限 ${s.subject}`;
+          td.appendChild(li);
+        });
+        // allow editing
+        td.style.cursor = 'pointer';
+        td.onclick = (e) => { if (e.target === td || e.target === numDiv) openDayEditor(dateStr); };
+      } else {
+        // weekly schedule
+        const dow = cur.getDay();
+        (weekly || []).filter(w => w.day_of_week === dow).forEach(w => {
+          const li = document.createElement('div');
+          li.textContent = `${w.period}限 ${w.subject}`;
+          td.appendChild(li);
+        });
+        td.style.cursor = 'pointer';
+        td.onclick = (e) => { if (e.target === td || e.target === numDiv) openDayEditor(dateStr); };
+      }
+
+      tr.appendChild(td);
+      cur.setDate(cur.getDate() + 1);
+    }
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+
+  // render weekly timetable table
+  renderWeeklyTable(weekly || []);
+}
+
+function toggleAdmin() {
+  const admin = document.getElementById('calendar_admin');
+  if (!admin) return;
+  admin.style.display = admin.style.display === 'none' ? 'block' : 'none';
+}
+
+function renderWeeklyTable(weekly) {
+  const container = document.getElementById('weekly_table');
+  container.innerHTML = '';
+  if (!weekly || weekly.length === 0) {
+    container.innerHTML = '<div class="card">通常時間割は未登録です</div>';
+    return;
+  }
+
+  // determine max period
+  let maxPeriod = 0;
+  weekly.forEach(w => { if (w.period && w.period > maxPeriod) maxPeriod = w.period; });
+  if (maxPeriod === 0) maxPeriod = 6;
+
+  const days = ['日','月','火','水','木','金','土'];
+  const table = document.createElement('table');
+  table.className = 'weekly-table';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  htr.appendChild(document.createElement('th'));
+  days.forEach(d => { const th = document.createElement('th'); th.textContent = d; htr.appendChild(th); });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (let p = 1; p <= maxPeriod; p++) {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th'); th.textContent = p + '限'; tr.appendChild(th);
+    for (let dow = 0; dow < 7; dow++) {
+      const td = document.createElement('td');
+      const cells = weekly.filter(w => w.day_of_week === dow && w.period === p);
+      if (cells.length) {
+        cells.forEach(c => {
+          const div = document.createElement('div');
+          div.textContent = c.subject + (c.start_time ? ' ' + c.start_time : '');
+          td.appendChild(div);
+        });
+      }
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+
+  table.appendChild(tbody);
+  container.appendChild(table);
+}
+
+// --- Day editor modal ---
+function openDayEditor(dateStr) {
+  let modal = document.getElementById('day_modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'day_modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 id="modal_date"></h3>
+          <button onclick="closeDayEditor()">閉じる</button>
+        </div>
+        <div>
+          <h4>休講日</h4>
+          <div id="modal_holidays"></div>
+          <div>
+            <input id="modal_holiday_reason" placeholder="理由">
+            <button onclick="addHolidayForDate()">休講追加</button>
+          </div>
+        </div>
+        <div>
+          <h4>特別時間割</h4>
+          <div id="modal_specials"></div>
+          <div>
+            <input id="modal_special_period" type="number" placeholder="限" style="width:80px">
+            <input id="modal_special_subject" placeholder="科目">
+            <input id="modal_special_start" type="time">
+            <input id="modal_special_end" type="time">
+            <button onclick="addSpecialForDate()">追加</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+  modal.dataset.date = dateStr;
+  document.getElementById('modal_date').textContent = dateStr;
+  loadDayDetails(dateStr);
+}
+
+function closeDayEditor() {
+  const modal = document.getElementById('day_modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function loadDayDetails(dateStr) {
+  const { data: specials } = await supabaseClient.from('special_schedule').select('*').eq('date', dateStr).order('period');
+  const { data: hd } = await supabaseClient.from('holidays').select('*').eq('date', dateStr);
+
+  const hs = document.getElementById('modal_holidays');
+  hs.innerHTML = '';
+  (hd || []).forEach(h => {
+    const div = document.createElement('div');
+    div.textContent = (h.reason || '休講');
+    const del = document.createElement('button'); del.textContent = '削除'; del.className = 'small-btn';
+    del.onclick = () => deleteHoliday(h.id);
+    div.appendChild(del);
+    hs.appendChild(div);
+  });
+
+  const ss = document.getElementById('modal_specials');
+  ss.innerHTML = '';
+  (specials || []).forEach(s => {
+    const div = document.createElement('div');
+    div.textContent = `${s.period}限 ${s.subject} ${s.start_time || ''}-${s.end_time || ''}`;
+    const del = document.createElement('button'); del.textContent = '削除'; del.className = 'small-btn';
+    del.onclick = () => deleteSpecial(s.id);
+    div.appendChild(del);
+    ss.appendChild(div);
+  });
+}
+
+async function addSpecialForDate() {
+  const modal = document.getElementById('day_modal');
+  if (!modal) return;
+  const date = modal.dataset.date;
+  const period = parseInt(document.getElementById('modal_special_period').value, 10);
+  const subject = document.getElementById('modal_special_subject').value.trim();
+  const start_time = document.getElementById('modal_special_start').value || null;
+  const end_time = document.getElementById('modal_special_end').value || null;
+  if (!date || isNaN(period) || !subject) { alert('日付・限・科目を入力してください'); return; }
+  const { error } = await supabaseClient.from('special_schedule').insert({ date, period, subject, start_time, end_time });
+  if (error) { alert('エラー: ' + error.message); return; }
+  loadDayDetails(date);
+  loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function addHolidayForDate() {
+  const modal = document.getElementById('day_modal');
+  if (!modal) return;
+  const date = modal.dataset.date;
+  const reason = document.getElementById('modal_holiday_reason').value.trim();
+  if (!date) return;
+  const { error } = await supabaseClient.from('holidays').insert({ date, reason });
+  if (error) { alert('エラー: ' + error.message); return; }
+  loadDayDetails(date);
+  loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function deleteSpecial(id) {
+  if (!confirm('削除して良いですか？')) return;
+  await supabaseClient.from('special_schedule').delete().eq('id', id);
+  const modal = document.getElementById('day_modal'); if (modal) loadDayDetails(modal.dataset.date);
+  loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function deleteHoliday(id) {
+  if (!confirm('削除して良いですか？')) return;
+  await supabaseClient.from('holidays').delete().eq('id', id);
+  const modal = document.getElementById('day_modal'); if (modal) loadDayDetails(modal.dataset.date);
+  loadCalendar(calendarState.year, calendarState.month);
+}
+
+// --- Day editor modal ---
+function openDayEditor(dateStr) {
+  let modal = document.getElementById('day_modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'day_modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div id="modal_date_label"></div>
+          <div><button onclick="closeDayEditor()">閉じる</button></div>
+        </div>
+        <hr>
+        <div id="modal_content"></div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+  document.getElementById('modal_date_label').textContent = dateStr;
+  loadDayDetails(dateStr);
+}
+
+function closeDayEditor() {
+  const modal = document.getElementById('day_modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function loadDayDetails(dateStr) {
+  const content = document.getElementById('modal_content');
+  content.innerHTML = '読み込み中...';
+
+  const [{ data: special }, { data: holidays }] = await Promise.all([
+    supabaseClient.from('special_schedule').select('*').eq('date', dateStr),
+    supabaseClient.from('holidays').select('*').eq('date', dateStr)
+  ]);
+
+  let html = '';
+  html += '<b>休講日</b><br>';
+  if (holidays && holidays.length) {
+    holidays.forEach(h => {
+      html += `<div>${h.reason || '休講'} <button class="small-btn" onclick="deleteHoliday('${h.id}')">削除</button></div>`;
+    });
+  } else {
+    html += '<div>登録なし</div>';
+  }
+
+  html += '<hr><b>特別時間割</b><br>';
+  html += `<div id="special_list">`;
+  if (special && special.length) {
+    special.forEach(s => {
+      html += `<div>${s.period}限 ${s.subject} ${s.start_time || ''}-${s.end_time || ''} <button class="small-btn" onclick="deleteSpecial('${s.id}')">削除</button></div>`;
+    });
+  } else {
+    html += '<div>登録なし</div>';
+  }
+  html += `</div>`;
+
+  html += '<hr><b>この日に特別時間割を追加</b><br>';
+  html += `期間: <input id="modal_period" type="number" style="width:80px"><br>`;
+  html += `科目: <input id="modal_subject" style="width:60%"><br>`;
+  html += `開始: <input id="modal_start" type="time"> 終了: <input id="modal_end" type="time"><br>`;
+  html += `<button onclick="addSpecialForDate('${dateStr}')">追加</button>`;
+
+  html += '<hr><b>この日を休講日にする</b><br>';
+  html += `理由: <input id="modal_h_reason" style="width:60%"><button onclick="addHolidayForDate('${dateStr}')">追加</button>`;
+
+  content.innerHTML = html;
+}
+
+async function addSpecialForDate(dateStr) {
+  const period = parseInt(document.getElementById('modal_period').value, 10);
+  const subject = document.getElementById('modal_subject').value.trim();
+  const start_time = document.getElementById('modal_start').value || null;
+  const end_time = document.getElementById('modal_end').value || null;
+  if (!dateStr || isNaN(period) || !subject) { alert('日付・限・科目を入力してください'); return; }
+  const { error } = await supabaseClient.from('special_schedule').insert({ date: dateStr, period, subject, start_time, end_time });
+  if (error) { alert('エラー: ' + error.message); return; }
+  await loadDayDetails(dateStr);
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function addHolidayForDate(dateStr) {
+  const reason = document.getElementById('modal_h_reason').value.trim();
+  const { error } = await supabaseClient.from('holidays').insert({ date: dateStr, reason });
+  if (error) { alert('エラー: ' + error.message); return; }
+  await loadDayDetails(dateStr);
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function deleteSpecial(id) {
+  if (!confirm('削除しますか？')) return;
+  const { error } = await supabaseClient.from('special_schedule').delete().eq('id', id);
+  if (error) { alert('エラー: ' + error.message); return; }
+  // refresh
+  const lbl = document.getElementById('modal_date_label').textContent;
+  await loadDayDetails(lbl);
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function deleteHoliday(id) {
+  if (!confirm('削除しますか？')) return;
+  const { error } = await supabaseClient.from('holidays').delete().eq('id', id);
+  if (error) { alert('エラー: ' + error.message); return; }
+  const lbl = document.getElementById('modal_date_label').textContent;
+  await loadDayDetails(lbl);
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+// --- Add reminder modal control ---
+function openAddReminder() {
+  const modal = document.getElementById('add_reminder_modal');
+  if (!modal) return;
+  // clear fields
+  document.getElementById('add_title').value = '';
+  document.getElementById('add_subject').value = '';
+  document.getElementById('add_type').value = 'preview';
+  document.getElementById('add_memo').value = '';
+  // default due: now in local datetime-local format
+  const now = new Date();
+  const pad = n => n.toString().padStart(2,'0');
+  const local = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  document.getElementById('add_due').value = local;
+  modal.style.display = 'flex';
+}
+
+function closeAddReminder() {
+  const modal = document.getElementById('add_reminder_modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitAddReminder() {
+  const title = document.getElementById('add_title').value.trim();
+  if (!title) { alert('タイトルを入力してください'); return; }
+  const subject = document.getElementById('add_subject').value.trim() || null;
+  const type = document.getElementById('add_type').value;
+  const dueVal = document.getElementById('add_due').value;
+  const memo = document.getElementById('add_memo').value || null;
+
+  let due_date = new Date().toISOString();
+  if (dueVal) {
+    try { due_date = new Date(dueVal).toISOString(); } catch(e) { due_date = new Date().toISOString(); }
+  }
+
+  const { error } = await supabaseClient.from('reminders').insert({ title, subject, type, due_date, memo });
+  if (error) { alert('保存に失敗しました: ' + error.message); return; }
+  closeAddReminder();
+  await loadReminders();
+}
+
+loadReminders();
+</script>
+
+</body>
+</html>
