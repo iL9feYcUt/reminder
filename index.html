@@ -21,6 +21,10 @@ header {
   border-bottom: 1px solid #ccc;
 }
 
+.subtabs { display:flex; gap:8px; margin-bottom:8px; }
+.subtab { padding:6px 10px; cursor:pointer; background:#f3f3f3; border-radius:6px; }
+.subtab.active { background:#007bff; color:#fff; }
+
 .tab {
   padding: 12px;
   cursor: pointer;
@@ -129,6 +133,25 @@ button {
   <div class="tab" onclick="switchTab('calendar', this)">カレンダー</div>
 </header>
 
+<!-- ログイン画面（別画面） -->
+<div id="login_page" class="modal" style="display:none;z-index:100">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h3>ログイン / 登録</h3>
+      <button onclick="closeLoginPage()">閉じる</button>
+    </div>
+    <div style="margin-top:8px">
+      <div>メールアドレス<br><input id="login_email" style="width:100%"></div>
+      <div>パスワード<br><input id="login_password" type="password" style="width:100%"></div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button onclick="loginWithPassword()">ログイン</button>
+        <button onclick="signupWithPassword()">登録</button>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#666">開発中は確認メールが必要な場合があります。登録後にメールを確認してください。</div>
+    </div>
+  </div>
+</div>
+
 <div id="reminder" class="container">
   <div class="card">
     <button id="gen_now_btn" onclick="runGenerateNow()">今すぐリマインダー生成</button>
@@ -205,8 +228,19 @@ button {
         <button onclick="toggleAdmin()">設定</button>
       </div>
     </div>
-    <div id="weekly_table" style="margin-bottom:8px"></div>
-    <div id="calendar_days"></div>
+
+    <div class="subtabs">
+      <div id="subtab_calendar" class="subtab active" onclick="switchCalendarView('calendar')">月カレンダー</div>
+      <div id="subtab_timetable" class="subtab" onclick="switchCalendarView('timetable')">時間割表</div>
+    </div>
+
+    <div id="calendar_view">
+      <div id="calendar_days"></div>
+    </div>
+
+    <div id="timetable_view" style="display:none">
+      <div id="weekly_table" style="margin-bottom:8px"></div>
+    </div>
   </div>
 </div>
 
@@ -239,9 +273,57 @@ button {
 const SUPABASE_URL = "https://ipcgecwqswavxozmelku.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlwY2dlY3dxc3dhdnhvem1lbGt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4NTUzODUsImV4cCI6MjA5MjQzMTM4NX0.xIQPpVAWItAwhbACjA602MXvVPhx9yV52G3sAEXzWq0";
 
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let currentTab = "reminder";
+
+// --- Auth helpers and login page control ---
+async function initAuth() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  // close login modal if already authenticated
+  if (session && session.user) closeLoginPage();
+  else openLoginPage();
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    if (session && session.user) closeLoginPage();
+  });
+}
+
+function openLoginPage() {
+  const el = document.getElementById('login_page'); if (!el) return; el.style.display = 'flex';
+}
+
+function closeLoginPage() { const el = document.getElementById('login_page'); if (!el) return; el.style.display = 'none'; }
+
+async function loginWithPassword() {
+  const email = document.getElementById('login_email').value.trim();
+  const password = document.getElementById('login_password').value;
+  if (!email || !password) { alert('メールとパスワードを入力してください'); return; }
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) { alert('ログインエラー: ' + error.message); return; }
+  closeLoginPage();
+}
+
+async function signupWithPassword() {
+  const email = document.getElementById('login_email').value.trim();
+  const password = document.getElementById('login_password').value;
+  if (!email || !password) { alert('メールとパスワードを入力してください'); return; }
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) { alert('登録エラー: ' + error.message); return; }
+  if (!data || !data.user) {
+    alert('登録処理を受け付けました。確認メールを送信しました。メール内のリンクで有効化してください。');
+  } else {
+    alert('登録完了しました。');
+    closeLoginPage();
+  }
+}
+
+async function signOutUser() { await supabaseClient.auth.signOut(); }
+
+async function ensureLoggedIn() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session || !session.user) { openLoginPage(); return false; }
+  return true;
+}
 
 function switchTab(tab, el) {
   document.getElementById("reminder").style.display = "none";
@@ -258,18 +340,39 @@ function switchTab(tab, el) {
   if (tab === "calendar") loadCalendar();
 }
 
+function switchCalendarView(view) {
+  const cal = document.getElementById('calendar_view');
+  const tim = document.getElementById('timetable_view');
+  const sc = document.getElementById('subtab_calendar');
+  const st = document.getElementById('subtab_timetable');
+  if (!cal || !tim || !sc || !st) return;
+  if (view === 'timetable') {
+    cal.style.display = 'none';
+    tim.style.display = 'block';
+    sc.classList.remove('active'); st.classList.add('active');
+  } else {
+    cal.style.display = 'block';
+    tim.style.display = 'none';
+    st.classList.remove('active'); sc.classList.add('active');
+  }
+}
+
 async function generateReminders() {
+  if (!await ensureLoggedIn()) return;
   return await supabaseClient.rpc("generate_reminders");
 }
 
 async function loadReminders() {
   // Hide completed reminders that are past due by marking hidden=true
   try {
-    await supabaseClient.from('reminders')
-      .update({ hidden: true })
-      .lt('due_date', new Date().toISOString())
-      .eq('completed', true)
-      .eq('hidden', false);
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session && session.user) {
+      await supabaseClient.from('reminders')
+        .update({ hidden: true })
+        .lt('due_date', new Date().toISOString())
+        .eq('completed', true)
+        .eq('hidden', false);
+    }
   } catch (e) {
     console.error('failed to mark expired completed as hidden', e);
   }
@@ -329,6 +432,7 @@ function escapeHtml(text) {
 }
 
 async function saveTitle(id) {
+  if (!await ensureLoggedIn()) return;
   const el = document.getElementById('title_input_' + id);
   if (!el) return;
   const title = el.value.trim();
@@ -340,6 +444,7 @@ async function saveTitle(id) {
 }
 
 async function saveMemo(id) {
+  if (!await ensureLoggedIn()) return;
   const el = document.getElementById('memo_input_' + id);
   if (!el) return;
   const memo = el.value;
@@ -397,6 +502,7 @@ function cancelMemoEdit(id) {
 }
 
 async function deleteReminder(id) {
+  if (!await ensureLoggedIn()) return;
   if (!confirm('このリマインダーを削除しますか？')) return;
   const { error } = await supabaseClient.from('reminders').delete().eq('id', id);
   if (error) { alert('削除エラー: ' + error.message); return; }
@@ -444,6 +550,7 @@ function toggleAutoGenerate(checked) {
 }
 
 async function toggleComplete(id, state) {
+  if (!await ensureLoggedIn()) return;
   // update completed state
   await supabaseClient.from("reminders")
     .update({ completed: state })
@@ -468,12 +575,14 @@ async function toggleComplete(id, state) {
 }
 
 async function updateMemo(id, memo) {
+  if (!await ensureLoggedIn()) return;
   await supabaseClient.from("reminders")
     .update({ memo: memo })
     .eq("id", id);
 }
 
 async function addReminder() {
+  if (!await ensureLoggedIn()) return;
   const title = prompt("タイトル");
   if (!title) return;
 
@@ -487,6 +596,7 @@ async function addReminder() {
 
 // --- 管理用フォームからの追加処理 ---
 async function addTerm() {
+  if (!await ensureLoggedIn()) return;
   const name = document.getElementById('term_name').value.trim();
   const start_date = document.getElementById('term_start').value;
   const end_date = document.getElementById('term_end').value;
@@ -496,6 +606,7 @@ async function addTerm() {
 }
 
 async function addHoliday() {
+  if (!await ensureLoggedIn()) return;
   const date = document.getElementById('holiday_date').value;
   const reason = document.getElementById('holiday_reason').value.trim();
   if (!date) { alert('日付を入力してください'); return; }
@@ -506,6 +617,7 @@ async function addHoliday() {
 }
 
 async function addWeekly() {
+  if (!await ensureLoggedIn()) return;
   const day_of_week = parseInt(document.getElementById('weekly_day').value, 10);
   const period = parseInt(document.getElementById('weekly_period').value, 10);
   const subject = document.getElementById('weekly_subject').value.trim();
@@ -518,6 +630,7 @@ async function addWeekly() {
 }
 
 async function addSpecial() {
+  if (!await ensureLoggedIn()) return;
   const date = document.getElementById('special_date').value;
   const period = parseInt(document.getElementById('special_period').value, 10);
   const subject = document.getElementById('special_subject').value.trim();
@@ -568,16 +681,19 @@ async function loadCalendar(year, month) {
   table.className = 'calendar-table';
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  ['日','月','火','水','木','金','土'].forEach(h => { const th = document.createElement('th'); th.textContent = h; headerRow.appendChild(th); });
+  // week starts on Monday
+  ['月','火','水','木','金','土','日'].forEach(h => { const th = document.createElement('th'); th.textContent = h; headerRow.appendChild(th); });
   thead.appendChild(headerRow);
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
 
-  let startWeekday = firstDay.getDay();
+  // compute start so week begins on Monday
+  let startWeekday = (firstDay.getDay() + 6) % 7; // Monday=0..Sunday=6
   let cur = new Date(year, month, 1 - startWeekday);
 
-  while (cur <= lastDay || cur.getDay() !== 0) {
+  // continue until we've reached the Monday after lastDay
+  while (cur <= lastDay || cur.getDay() !== 1) {
     const tr = document.createElement('tr');
     for (let i = 0; i < 7; i++) {
       const td = document.createElement('td');
@@ -616,13 +732,8 @@ async function loadCalendar(year, month) {
         td.style.cursor = 'pointer';
         td.onclick = (e) => { if (e.target === td || e.target === numDiv) openDayEditor(dateStr); };
       } else {
-        // weekly schedule
-        const dow = cur.getDay();
-        (weekly || []).filter(w => w.day_of_week === dow).forEach(w => {
-          const li = document.createElement('div');
-          li.textContent = `${w.period}限 ${w.subject}`;
-          td.appendChild(li);
-        });
+        // Do not render weekly schedule entries in the month calendar to keep it clean.
+        // Keep click handler so user can open day editor to view/edit that day's schedule.
         td.style.cursor = 'pointer';
         td.onclick = (e) => { if (e.target === td || e.target === numDiv) openDayEditor(dateStr); };
       }
@@ -638,6 +749,8 @@ async function loadCalendar(year, month) {
 
   // render weekly timetable table
   renderWeeklyTable(weekly || []);
+  // ensure calendar subview shown by default
+  try { switchCalendarView('calendar'); } catch(e) {}
 }
 
 function toggleAdmin() {
@@ -659,7 +772,8 @@ function renderWeeklyTable(weekly) {
   weekly.forEach(w => { if (w.period && w.period > maxPeriod) maxPeriod = w.period; });
   if (maxPeriod === 0) maxPeriod = 6;
 
-  const days = ['日','月','火','水','木','金','土'];
+  // columns: Monday..Sunday
+  const days = ['月','火','水','木','金','土','日'];
   const table = document.createElement('table');
   table.className = 'weekly-table';
   const thead = document.createElement('thead');
@@ -673,14 +787,25 @@ function renderWeeklyTable(weekly) {
   for (let p = 1; p <= maxPeriod; p++) {
     const tr = document.createElement('tr');
     const th = document.createElement('th'); th.textContent = p + '限'; tr.appendChild(th);
-    for (let dow = 0; dow < 7; dow++) {
+    for (let col = 0; col < 7; col++) {
       const td = document.createElement('td');
+      // map column (0=Mon) back to week day number where 0=Sun..6=Sat
+      const dow = (col + 1) % 7;
       const cells = weekly.filter(w => w.day_of_week === dow && w.period === p);
       if (cells.length) {
         cells.forEach(c => {
           const div = document.createElement('div');
-          div.textContent = c.subject + (c.start_time ? ' ' + c.start_time : '');
+          div.textContent = c.subject;
+          // action buttons: edit / delete
+          const editBtn = document.createElement('button'); editBtn.textContent = '編集'; editBtn.className = 'small-btn';
+          editBtn.onclick = (e) => { e.stopPropagation(); openWeeklyEdit(c.id); };
+          const delBtn = document.createElement('button'); delBtn.textContent = '削除'; delBtn.className = 'small-btn';
+          delBtn.onclick = (e) => { e.stopPropagation(); deleteWeekly(c.id); };
+          const actions = document.createElement('div');
+          actions.style.marginTop = '6px';
+          actions.appendChild(editBtn); actions.appendChild(delBtn);
           td.appendChild(div);
+          td.appendChild(actions);
         });
       }
       tr.appendChild(td);
@@ -767,6 +892,7 @@ async function loadDayDetails(dateStr) {
 }
 
 async function addSpecialForDate() {
+  if (!await ensureLoggedIn()) return;
   const modal = document.getElementById('day_modal');
   if (!modal) return;
   const date = modal.dataset.date;
@@ -782,6 +908,7 @@ async function addSpecialForDate() {
 }
 
 async function addHolidayForDate() {
+  if (!await ensureLoggedIn()) return;
   const modal = document.getElementById('day_modal');
   if (!modal) return;
   const date = modal.dataset.date;
@@ -794,6 +921,7 @@ async function addHolidayForDate() {
 }
 
 async function deleteSpecial(id) {
+  if (!await ensureLoggedIn()) return;
   if (!confirm('削除して良いですか？')) return;
   await supabaseClient.from('special_schedule').delete().eq('id', id);
   const modal = document.getElementById('day_modal'); if (modal) loadDayDetails(modal.dataset.date);
@@ -801,6 +929,7 @@ async function deleteSpecial(id) {
 }
 
 async function deleteHoliday(id) {
+  if (!await ensureLoggedIn()) return;
   if (!confirm('削除して良いですか？')) return;
   await supabaseClient.from('holidays').delete().eq('id', id);
   const modal = document.getElementById('day_modal'); if (modal) loadDayDetails(modal.dataset.date);
@@ -879,6 +1008,7 @@ async function loadDayDetails(dateStr) {
 }
 
 async function addSpecialForDate(dateStr) {
+  if (!await ensureLoggedIn()) return;
   const period = parseInt(document.getElementById('modal_period').value, 10);
   const subject = document.getElementById('modal_subject').value.trim();
   const start_time = document.getElementById('modal_start').value || null;
@@ -891,6 +1021,7 @@ async function addSpecialForDate(dateStr) {
 }
 
 async function addHolidayForDate(dateStr) {
+  if (!await ensureLoggedIn()) return;
   const reason = document.getElementById('modal_h_reason').value.trim();
   const { error } = await supabaseClient.from('holidays').insert({ date: dateStr, reason });
   if (error) { alert('エラー: ' + error.message); return; }
@@ -899,6 +1030,7 @@ async function addHolidayForDate(dateStr) {
 }
 
 async function deleteSpecial(id) {
+  if (!await ensureLoggedIn()) return;
   if (!confirm('削除しますか？')) return;
   const { error } = await supabaseClient.from('special_schedule').delete().eq('id', id);
   if (error) { alert('エラー: ' + error.message); return; }
@@ -909,11 +1041,78 @@ async function deleteSpecial(id) {
 }
 
 async function deleteHoliday(id) {
+  if (!await ensureLoggedIn()) return;
   if (!confirm('削除しますか？')) return;
   const { error } = await supabaseClient.from('holidays').delete().eq('id', id);
   if (error) { alert('エラー: ' + error.message); return; }
   const lbl = document.getElementById('modal_date_label').textContent;
   await loadDayDetails(lbl);
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+// --- Weekly edit / delete ---
+async function deleteWeekly(id) {
+  if (!await ensureLoggedIn()) return;
+  if (!confirm('この時間割を削除しますか？')) return;
+  const { error } = await supabaseClient.from('weekly_schedule').delete().eq('id', id);
+  if (error) { alert('削除エラー: ' + error.message); return; }
+  await loadCalendar(calendarState.year, calendarState.month);
+}
+
+async function openWeeklyEdit(id) {
+  if (!id) return;
+  const { data, error } = await supabaseClient.from('weekly_schedule').select('*').eq('id', id).single();
+  if (error) { alert('読み込みエラー: ' + error.message); return; }
+
+  let modal = document.getElementById('weekly_edit_modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'weekly_edit_modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3>時間割編集</h3>
+          <button onclick="closeWeeklyEdit()">閉じる</button>
+        </div>
+        <div>
+          <div>曜日 <select id="we_day"><option value="0">日</option><option value="1">月</option><option value="2">火</option><option value="3">水</option><option value="4">木</option><option value="5">金</option><option value="6">土</option></select></div>
+          <div>限 <input id="we_period" type="number" style="width:80px"></div>
+          <div>科目 <input id="we_subject" style="width:100%"></div>
+          <div>開始 <input id="we_start" type="time"> 終了 <input id="we_end" type="time"></div>
+          <div style="margin-top:8px"><button onclick="saveWeeklyEdit()">保存</button></div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+
+  modal.style.display = 'flex';
+  modal.dataset.id = id;
+  document.getElementById('we_day').value = data.day_of_week;
+  document.getElementById('we_period').value = data.period;
+  document.getElementById('we_subject').value = data.subject || '';
+  document.getElementById('we_start').value = data.start_time || '';
+  document.getElementById('we_end').value = data.end_time || '';
+}
+
+function closeWeeklyEdit() {
+  const modal = document.getElementById('weekly_edit_modal'); if (modal) modal.style.display = 'none';
+}
+
+async function saveWeeklyEdit() {
+  if (!await ensureLoggedIn()) return;
+  const modal = document.getElementById('weekly_edit_modal'); if (!modal) return;
+  const id = modal.dataset.id;
+  const day_of_week = parseInt(document.getElementById('we_day').value, 10);
+  const period = parseInt(document.getElementById('we_period').value, 10);
+  const subject = document.getElementById('we_subject').value.trim();
+  const start_time = document.getElementById('we_start').value || null;
+  const end_time = document.getElementById('we_end').value || null;
+  if (isNaN(day_of_week) || isNaN(period) || !subject) { alert('曜日・限・科目を入力してください'); return; }
+
+  const { error } = await supabaseClient.from('weekly_schedule').update({ day_of_week, period, subject, start_time, end_time }).eq('id', id);
+  if (error) { alert('保存エラー: ' + error.message); return; }
+  closeWeeklyEdit();
   await loadCalendar(calendarState.year, calendarState.month);
 }
 
@@ -940,6 +1139,7 @@ function closeAddReminder() {
 }
 
 async function submitAddReminder() {
+  if (!await ensureLoggedIn()) return;
   const title = document.getElementById('add_title').value.trim();
   if (!title) { alert('タイトルを入力してください'); return; }
   const subject = document.getElementById('add_subject').value.trim() || null;
@@ -958,6 +1158,7 @@ async function submitAddReminder() {
   await loadReminders();
 }
 
+initAuth();
 loadReminders();
 </script>
 
