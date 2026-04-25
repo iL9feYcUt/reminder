@@ -86,6 +86,10 @@ button {
 .reminder-actions { margin-left: auto; display:flex; gap:6px; }
 .reminder-textarea { width:100%; box-sizing:border-box; min-height:64px; margin-top:6px; }
 .reminder-input { width:60%; }
+.reminder-header input[type="checkbox"] { flex: 0 0 28px; width:18px; height:18px; }
+.reminder-header > div { min-width:0; }
+.icon-edit { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid transparent; background:transparent; cursor:pointer; }
+.icon-edit svg { width:16px; height:16px; }
 .btn-danger { background:#dc3545; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
 .btn-primary { background:#007bff; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
 
@@ -274,7 +278,10 @@ button {
         </div>
         <div>期限（日時）<br><input id="add_due" type="datetime-local" style="width:100%"></div>
         <div>メモ<br><textarea id="add_memo" style="width:100%"></textarea></div>
-        <div style="margin-top:8px"><button onclick="submitAddReminder()">追加</button></div>
+        <div style="margin-top:8px">
+          <button id="modal_save_btn" onclick="submitAddReminder()">追加</button>
+          <button id="modal_delete_btn" class="btn-danger" style="display:none;margin-left:8px" onclick="deleteReminderFromModal()">削除</button>
+        </div>
       </div>
     </div>
   </div>
@@ -408,27 +415,20 @@ async function loadReminders() {
     div.innerHTML = `
       <div class="reminder-header">
         <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
-        <div id="title_view_${r.id}" style="flex:1;">
+        <div id="title_view_${r.id}" style="flex:1;min-width:0;">
           <span id="title_text_${r.id}">${escapeHtml(r.title)}</span>
+          ${tag}
           <input id="title_input_${r.id}" class="reminder-input" style="display:none;" value="${escapeHtml(r.title)}">
         </div>
         <div class="reminder-actions">
-          <button class="small-btn btn-primary" id="edit_btn_${r.id}" onclick="enableEdit('${r.id}')">編集</button>
-          <button class="small-btn btn-primary" id="save_btn_${r.id}" style="display:none" onclick="saveTitle('${r.id}')">保存</button>
-          <button class="small-btn" id="cancel_btn_${r.id}" style="display:none" onclick="cancelEdit('${r.id}')">キャンセル</button>
-          <button class="small-btn btn-danger" onclick="deleteReminder('${r.id}')">削除</button>
+          <button class="icon-edit" aria-label="編集" onclick="openReminderEdit('${r.id}')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+          </button>
         </div>
-        ${tag}
       </div>
       <div><small>${new Date(r.due_date).toLocaleString()}</small></div>
       <div>
         <div id="memo_view_${r.id}">${escapeHtml(r.memo || '')}</div>
-        <textarea id="memo_input_${r.id}" class="reminder-textarea" style="display:none">${escapeHtml(r.memo || '')}</textarea>
-        <div style="display:flex;justify-content:flex-end">
-          <button class="small-btn btn-primary" id="edit_memo_btn_${r.id}" onclick="enableMemoEdit('${r.id}')">メモ編集</button>
-          <button class="small-btn btn-primary" id="save_memo_btn_${r.id}" style="display:none" onclick="saveMemo('${r.id}')">メモ保存</button>
-          <button class="small-btn" id="cancel_memo_btn_${r.id}" style="display:none" onclick="cancelMemoEdit('${r.id}')">キャンセル</button>
-        </div>
       </div>
     `;
 
@@ -1137,6 +1137,10 @@ function openAddReminder() {
   document.getElementById('add_subject').value = '';
   document.getElementById('add_type').value = 'preview';
   document.getElementById('add_memo').value = '';
+  // clear edit state
+  modal.dataset.editId = '';
+  const delBtn = document.getElementById('modal_delete_btn'); if (delBtn) delBtn.style.display = 'none';
+  const saveBtn = document.getElementById('modal_save_btn'); if (saveBtn) saveBtn.textContent = '追加';
   // default due: now in local datetime-local format
   const now = new Date();
   const pad = n => n.toString().padStart(2,'0');
@@ -1148,6 +1152,39 @@ function openAddReminder() {
 function closeAddReminder() {
   const modal = document.getElementById('add_reminder_modal');
   if (modal) modal.style.display = 'none';
+}
+
+async function openReminderEdit(id) {
+  if (!id) return;
+  if (!await ensureLoggedIn()) return;
+  const { data, error } = await supabaseClient.from('reminders').select('*').eq('id', id).single();
+  if (error) { alert('読み込みエラー: ' + error.message); return; }
+  const modal = document.getElementById('add_reminder_modal'); if (!modal) return;
+  modal.dataset.editId = id;
+  document.getElementById('add_title').value = data.title || '';
+  document.getElementById('add_subject').value = data.subject || '';
+  document.getElementById('add_type').value = data.type || 'preview';
+  document.getElementById('add_memo').value = data.memo || '';
+  if (data.due_date) {
+    const d = new Date(data.due_date);
+    const pad = n => n.toString().padStart(2,'0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    document.getElementById('add_due').value = local;
+  }
+  const delBtn = document.getElementById('modal_delete_btn'); if (delBtn) delBtn.style.display = 'inline-block';
+  const saveBtn = document.getElementById('modal_save_btn'); if (saveBtn) saveBtn.textContent = '保存';
+  modal.style.display = 'flex';
+}
+
+async function deleteReminderFromModal() {
+  if (!await ensureLoggedIn()) return;
+  const modal = document.getElementById('add_reminder_modal'); if (!modal) return;
+  const id = modal.dataset.editId; if (!id) return;
+  if (!confirm('このリマインダーを削除しますか？')) return;
+  const { error } = await supabaseClient.from('reminders').delete().eq('id', id);
+  if (error) { alert('削除エラー: ' + error.message); return; }
+  closeAddReminder();
+  await loadReminders();
 }
 
 async function submitAddReminder() {
@@ -1164,8 +1201,15 @@ async function submitAddReminder() {
     try { due_date = new Date(dueVal).toISOString(); } catch(e) { due_date = new Date().toISOString(); }
   }
 
-  const { error } = await supabaseClient.from('reminders').insert({ title, subject, type, due_date, memo });
-  if (error) { alert('保存に失敗しました: ' + error.message); return; }
+  const modal = document.getElementById('add_reminder_modal');
+  const editId = modal && modal.dataset ? modal.dataset.editId : null;
+  if (editId) {
+    const { error } = await supabaseClient.from('reminders').update({ title, subject, type, due_date, memo }).eq('id', editId);
+    if (error) { alert('保存に失敗しました: ' + error.message); return; }
+  } else {
+    const { error } = await supabaseClient.from('reminders').insert({ title, subject, type, due_date, memo });
+    if (error) { alert('保存に失敗しました: ' + error.message); return; }
+  }
   closeAddReminder();
   await loadReminders();
 }
