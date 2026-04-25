@@ -173,9 +173,7 @@ button {
 
 <div id="reminder" class="container">
   <div class="card">
-    <button id="gen_now_btn" onclick="runGenerateNow()">今すぐリマインダー生成</button>
-    <label style="margin-left:8px"><input id="auto_generate_chk" type="checkbox" onchange="toggleAutoGenerate(this.checked)"> 自動生成</label>
-    <input id="auto_interval" type="number" min="1" value="60" style="width:80px;margin-left:6px"> 分ごと
+    <button id="gen_now_btn" onclick="runGenerateNow()">リマインダー生成</button>
     <span id="gen_status" style="margin-left:12px;color:#444"></span>
   </div>
 
@@ -586,9 +584,6 @@ async function deleteReminder(id) {
   await loadReminders();
 }
 
-// --- 生成トリガー制御 ---
-let autoGenIntervalId = null;
-
 async function runGenerateNow() {
   const btn = document.getElementById('gen_now_btn');
   const status = document.getElementById('gen_status');
@@ -607,22 +602,6 @@ async function runGenerateNow() {
     status.textContent = '失敗: ' + e.message;
   } finally {
     btn.disabled = false;
-  }
-}
-
-function toggleAutoGenerate(checked) {
-  const status = document.getElementById('gen_status');
-  if (checked) {
-    const mins = parseInt(document.getElementById('auto_interval').value, 10) || 60;
-    // set interval in ms
-    autoGenIntervalId = setInterval(async () => {
-      try { await generateReminders(); await loadReminders(); }
-      catch (e) { console.error('auto generate failed', e); }
-    }, mins * 60 * 1000);
-    status.textContent = '自動生成: ON (' + mins + '分毎)';
-  } else {
-    if (autoGenIntervalId) { clearInterval(autoGenIntervalId); autoGenIntervalId = null; }
-    status.textContent = '自動生成: OFF';
   }
 }
 
