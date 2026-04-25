@@ -96,6 +96,9 @@ button {
 /* memo styling */
 .reminder-memo { font-size: 13px; color: #666; margin-top:6px; white-space:pre-wrap; }
 
+/* small badge for calendar counts */
+.tag.small-badge { font-size: 14px; padding: 2px 6px; margin-left:6px; display:inline-block; }
+
 .due-expired { color: #c00; font-weight: 600; }
 .due-small { font-size: 12px; color: #444; }
 .btn-danger { background:#dc3545; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
@@ -144,6 +147,7 @@ button {
   .weekly-table th { font-size: 12px; padding:4px; }
   .weekly-table td { font-size: 9px; padding:4px; }
   .weekly-table th:first-child { width: 20px; }
+  .tag.small-badge { font-size: 10px; padding: 2px 2px; margin-left:2px; display:inline-block; }
 }
 </style>
 </head>
@@ -734,6 +738,29 @@ async function loadCalendar(year, month) {
 
   document.getElementById('calendar_label').textContent = `${year}年 ${month + 1}月`;
 
+  // fetch reminders for this month to show per-day counts (preview/review)
+  let reminderCounts = {};
+  try {
+    const startRange = new Date(year, month, 1, 0, 0, 0, 0).toISOString();
+    const endRange = new Date(year, month + 1, 0, 23, 59, 59, 999).toISOString();
+    const { data: rems } = await supabaseClient.from('reminders')
+      .select('type,due_date')
+      .gte('due_date', startRange)
+      .lte('due_date', endRange)
+      .neq('hidden', true);
+    const pad = n => String(n).padStart(2, '0');
+    (rems || []).forEach(r => {
+      if (!r.due_date) return;
+      const d = new Date(r.due_date);
+      const key = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      reminderCounts[key] = reminderCounts[key] || { preview: 0, review: 0 };
+      if (r.type === 'preview') reminderCounts[key].preview++;
+      if (r.type === 'review') reminderCounts[key].review++;
+    });
+  } catch (e) {
+    console.error('failed to load reminders for calendar counts', e);
+  }
+
   const table = document.createElement('table');
   table.className = 'calendar-table';
   const thead = document.createElement('thead');
@@ -766,6 +793,23 @@ async function loadCalendar(year, month) {
       numDiv.className = 'calendar-day-number';
       numDiv.textContent = dayNum;
       td.appendChild(numDiv);
+
+      // append small badges for preview/review counts
+      const cd = reminderCounts[dateStr];
+      if (cd) {
+        if (cd.preview) {
+          const b = document.createElement('span');
+          b.className = 'tag preview small-badge';
+          b.textContent = `予習 ${cd.preview}`;
+          td.appendChild(b);
+        }
+        if (cd.review) {
+          const b2 = document.createElement('span');
+          b2.className = 'tag review small-badge';
+          b2.textContent = `復習 ${cd.review}`;
+          td.appendChild(b2);
+        }
+      }
 
       // holiday?
       const isHoliday = (holidays || []).find(h => h.date === dateStr);
