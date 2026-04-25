@@ -754,7 +754,9 @@ async function loadCalendar(year, month) {
     const tr = document.createElement('tr');
     for (let i = 0; i < 7; i++) {
       const td = document.createElement('td');
-      const dateStr = cur.toISOString().split('T')[0];
+      // format local date yyyy-mm-dd (avoid toISOString which uses UTC)
+      const pad = n => String(n).padStart(2, '0');
+      const dateStr = `${cur.getFullYear()}-${pad(cur.getMonth()+1)}-${pad(cur.getDate())}`;
       const inMonth = cur.getMonth() === month;
       const dayNum = cur.getDate();
 
