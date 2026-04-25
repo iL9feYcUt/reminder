@@ -45,6 +45,8 @@ header {
   border-radius: 8px;
 }
 
+.reminder-group { margin-bottom: 25px; }
+
 .completed {
   opacity: 0.4;
 }
@@ -90,6 +92,9 @@ button {
 .reminder-header > div { min-width:0; }
 .icon-edit { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid transparent; background:transparent; cursor:pointer; }
 .icon-edit svg { width:16px; height:16px; }
+
+.due-expired { color: #c00; font-weight: 600; }
+.due-small { font-size: 12px; color: #444; }
 .btn-danger { background:#dc3545; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
 .btn-primary { background:#007bff; color:#fff; border:none; padding:6px 8px; border-radius:4px; }
 
@@ -212,8 +217,7 @@ button {
       </select>
       <input id="weekly_period" type="number" placeholder="限（例:1）" min="1">
       <input id="weekly_subject" placeholder="科目">
-      <input id="weekly_start" type="time">
-      <input id="weekly_end" type="time">
+      <!-- 時刻は通常登録しない。例外は編集モーダルで設定 -->
       <button onclick="addWeekly()">追加</button>
     </div>
   </div>
@@ -405,35 +409,98 @@ async function loadReminders() {
 
   const now = new Date();
 
+  // Group reminders by date (yyyy-mm-dd). Items without due_date go under "期限未設定".
+  const groups = {};
+  const noDue = [];
+  const today = new Date();
+  const toDateOnly = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
   data.forEach(r => {
-    if (new Date(r.due_date) < now && r.completed) return;
-
-    const div = document.createElement("div");
-    div.className = "card " + (r.completed ? "completed" : "");
-    const tag = `<span class="tag ${r.type}">${r.type === "preview" ? "予習" : "復習"}</span>`;
-
-    div.innerHTML = `
-      <div class="reminder-header">
-        <input type="checkbox" ${r.completed ? "checked" : ""} onchange="toggleComplete('${r.id}', this.checked)">
-        <div id="title_view_${r.id}" style="flex:1;min-width:0;">
-          <span id="title_text_${r.id}">${escapeHtml(r.title)}</span>
-          ${tag}
-          <input id="title_input_${r.id}" class="reminder-input" style="display:none;" value="${escapeHtml(r.title)}">
-        </div>
-        <div class="reminder-actions">
-          <button class="icon-edit" aria-label="編集" onclick="openReminderEdit('${r.id}')">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
-          </button>
-        </div>
-      </div>
-      <div><small>${new Date(r.due_date).toLocaleString()}</small></div>
-      <div>
-        <div id="memo_view_${r.id}">${escapeHtml(r.memo || '')}</div>
-      </div>
-    `;
-
-    container.appendChild(div);
+    if (r.completed && r.due_date && new Date(r.due_date) < now) return;
+    if (!r.due_date) { noDue.push(r); return; }
+    const d = new Date(r.due_date);
+    const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    groups[key] = groups[key] || [];
+    groups[key].push(r);
   });
+
+  // sort keys
+  const keys = Object.keys(groups).sort((a,b) => new Date(a) - new Date(b));
+
+  // render each day group
+  keys.forEach(k => {
+    const parts = k.split('-');
+    const d = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    const diffDays = Math.floor((toDateOnly(d) - toDateOnly(today)) / (1000*60*60*24));
+    let header = '';
+    if (diffDays === 0) header = '今日';
+    else if (diffDays === 1) header = '明日';
+    else header = (d.getMonth()+1) + '/' + d.getDate();
+
+    // wrap this day's header and items in a group container so groups have spacing
+    const groupWrap = document.createElement('div');
+    groupWrap.className = 'reminder-group';
+
+    const dayDiv = document.createElement('div');
+    dayDiv.className = 'card';
+    dayDiv.innerHTML = `<strong>${header}</strong>`;
+    groupWrap.appendChild(dayDiv);
+
+    groups[k].forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'card ' + (r.completed ? 'completed' : '');
+      const tag = `<span class="tag ${r.type}">${r.type === 'preview' ? '予習' : '復習'}</span>`;
+      div.innerHTML = `
+        <div class="reminder-header">
+          <input type="checkbox" ${r.completed ? 'checked' : ''} onchange="toggleComplete('${r.id}', this.checked)">
+          <div id="title_view_${r.id}" style="flex:1;min-width:0;">
+            <span id="title_text_${r.id}">${escapeHtml(r.title)}</span>
+            ${tag}
+            <input id="title_input_${r.id}" class="reminder-input" style="display:none;" value="${escapeHtml(r.title)}">
+          </div>
+          <div class="reminder-actions">
+            <button class="icon-edit" aria-label="編集" onclick="openReminderEdit('${r.id}')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <div id="memo_view_${r.id}">${escapeHtml(r.memo || '')}</div>
+        </div>
+      `;
+      groupWrap.appendChild(div);
+    });
+
+    container.appendChild(groupWrap);
+  });
+
+  if (noDue.length) {
+    const nd = document.createElement('div'); nd.className = 'card'; nd.innerHTML = '<strong>期限未設定</strong>'; container.appendChild(nd);
+    noDue.forEach(r => {
+      const div = document.createElement('div');
+      div.className = 'card ' + (r.completed ? 'completed' : '');
+      const tag = `<span class="tag ${r.type}">${r.type === 'preview' ? '予習' : '復習'}</span>`;
+      div.innerHTML = `
+        <div class="reminder-header">
+          <input type="checkbox" ${r.completed ? 'checked' : ''} onchange="toggleComplete('${r.id}', this.checked)">
+          <div id="title_view_${r.id}" style="flex:1;min-width:0;">
+            <span id="title_text_${r.id}">${escapeHtml(r.title)}</span>
+            ${tag}
+            <input id="title_input_${r.id}" class="reminder-input" style="display:none;" value="${escapeHtml(r.title)}">
+          </div>
+          <div class="reminder-actions">
+            <button class="icon-edit" aria-label="編集" onclick="openReminderEdit('${r.id}')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <div id="memo_view_${r.id}">${escapeHtml(r.memo || '')}</div>
+        </div>
+      `;
+      container.appendChild(div);
+    });
+  }
 }
 
 function escapeHtml(text) {
@@ -631,10 +698,8 @@ async function addWeekly() {
   const day_of_week = parseInt(document.getElementById('weekly_day').value, 10);
   const period = parseInt(document.getElementById('weekly_period').value, 10);
   const subject = document.getElementById('weekly_subject').value.trim();
-  const start_time = document.getElementById('weekly_start').value || null;
-  const end_time = document.getElementById('weekly_end').value || null;
   if (isNaN(day_of_week) || isNaN(period) || !subject) { alert('曜日・限・科目を入力してください'); return; }
-  const { error } = await supabaseClient.from('weekly_schedule').insert({ day_of_week, period, subject, start_time, end_time });
+  const { error } = await supabaseClient.from('weekly_schedule').insert({ day_of_week, period, subject });
   if (error) { alert('エラー: ' + error.message); return; }
   alert('追加しました');
 }
@@ -778,11 +843,12 @@ function renderWeeklyTable(weekly) {
   }
 
   // determine max period
+  // determine max period (show at least 8)
   let maxPeriod = 0;
   weekly.forEach(w => { if (w.period && w.period > maxPeriod) maxPeriod = w.period; });
-  if (maxPeriod === 0) maxPeriod = 6;
+  if (maxPeriod < 8) maxPeriod = 8;
 
-  // columns: Monday..Sunday
+  // columns: Monday..Friday
   const days = ['月','火','水','木','金'];
   const table = document.createElement('table');
   table.className = 'weekly-table';
@@ -797,29 +863,20 @@ function renderWeeklyTable(weekly) {
   for (let p = 1; p <= maxPeriod; p++) {
     const tr = document.createElement('tr');
     const th = document.createElement('th'); th.textContent = p ; tr.appendChild(th);
-    for (let col = 0; col < 5; col++) {
+    for (let col = 0; col < days.length; col++) {
       const td = document.createElement('td');
-      // map column (0=Mon) back to week day number where 0=Sun..6=Sat
-      const dow = (col + 1) % 7;
+      // map column (0=Mon) to day_of_week (Mon=1..Fri=5)
+      const dow = col + 1;
       const cells = weekly.filter(w => w.day_of_week === dow && w.period === p);
       if (cells.length) {
         cells.forEach(c => {
           const div = document.createElement('div');
           div.textContent = c.subject;
-          // action buttons: edit / delete
-          const editBtn = document.createElement('button'); editBtn.className = 'icon-btn'; editBtn.setAttribute('aria-label','編集');
-          editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>';
-          editBtn.onclick = (e) => { e.stopPropagation(); openWeeklyEdit(c.id); };
-          const delBtn = document.createElement('button'); delBtn.className = 'icon-btn'; delBtn.setAttribute('aria-label','削除');
-          delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
-          delBtn.onclick = (e) => { e.stopPropagation(); deleteWeekly(c.id); };
-          const actions = document.createElement('div');
-          actions.style.marginTop = '0px';
-          actions.appendChild(editBtn); actions.appendChild(delBtn);
           td.appendChild(div);
-          td.appendChild(actions);
         });
       }
+      td.style.cursor = 'pointer';
+      td.onclick = (e) => { e.stopPropagation(); openWeeklyCellEditor(dow, p); };
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -1121,11 +1178,54 @@ async function saveWeeklyEdit() {
   const start_time = document.getElementById('we_start').value || null;
   const end_time = document.getElementById('we_end').value || null;
   if (isNaN(day_of_week) || isNaN(period) || !subject) { alert('曜日・限・科目を入力してください'); return; }
-
-  const { error } = await supabaseClient.from('weekly_schedule').update({ day_of_week, period, subject, start_time, end_time }).eq('id', id);
-  if (error) { alert('保存エラー: ' + error.message); return; }
+  if (id) {
+    const { error } = await supabaseClient.from('weekly_schedule').update({ day_of_week, period, subject, start_time, end_time }).eq('id', id);
+    if (error) { alert('保存エラー: ' + error.message); return; }
+  } else {
+    const { error } = await supabaseClient.from('weekly_schedule').insert({ day_of_week, period, subject, start_time, end_time });
+    if (error) { alert('保存エラー: ' + error.message); return; }
+  }
   closeWeeklyEdit();
   await loadCalendar(calendarState.year, calendarState.month);
+}
+
+// open editor for a specific weekday/period (create or edit existing)
+async function openWeeklyCellEditor(day_of_week, period) {
+  // try to find existing entry
+  const { data: existing } = await supabaseClient.from('weekly_schedule').select('*').eq('day_of_week', day_of_week).eq('period', period).maybeSingle();
+  if (existing && existing.id) {
+    openWeeklyEdit(existing.id);
+    return;
+  }
+  // otherwise open modal for new entry
+  let modal = document.getElementById('weekly_edit_modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'weekly_edit_modal';
+    modal.className = 'modal';
+    modal.innerHTML = `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3>時間割編集</h3>
+          <button onclick="closeWeeklyEdit()">閉じる</button>
+        </div>
+        <div>
+          <div>曜日 <select id="we_day"><option value="0">日</option><option value="1">月</option><option value="2">火</option><option value="3">水</option><option value="4">木</option><option value="5">金</option><option value="6">土</option></select></div>
+          <div>限 <input id="we_period" type="number" style="width:80px"></div>
+          <div>科目 <input id="we_subject" style="width:100%"></div>
+          <div>開始 <input id="we_start" type="time"> 終了 <input id="we_end" type="time"></div>
+          <div style="margin-top:8px"><button onclick="saveWeeklyEdit()">保存</button></div>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+  }
+  modal.dataset.id = '';
+  document.getElementById('we_day').value = String(day_of_week);
+  document.getElementById('we_period').value = String(period);
+  document.getElementById('we_subject').value = '';
+  document.getElementById('we_start').value = '';
+  document.getElementById('we_end').value = '';
+  modal.style.display = 'flex';
 }
 
 // --- Add reminder modal control ---
