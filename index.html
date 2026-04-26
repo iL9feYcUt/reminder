@@ -744,10 +744,11 @@ async function loadCalendar(year, month) {
     const startRange = new Date(year, month, 1, 0, 0, 0, 0).toISOString();
     const endRange = new Date(year, month + 1, 0, 23, 59, 59, 999).toISOString();
     const { data: rems } = await supabaseClient.from('reminders')
-      .select('type,due_date')
+      .select('type,due_date,completed')
       .gte('due_date', startRange)
       .lte('due_date', endRange)
-      .neq('hidden', true);
+      .neq('hidden', true)
+      .eq('completed', false);
     const pad = n => String(n).padStart(2, '0');
     (rems || []).forEach(r => {
       if (!r.due_date) return;

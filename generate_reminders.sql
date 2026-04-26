@@ -37,8 +37,13 @@ begin
       continue;
     end if;
 
-    -- special schedules for that date
-    for rec in select * from public.special_schedule ss where ss.date = d loop
+    -- special schedules for that date: group by subject and pick earliest period/start_time
+    for rec in
+      select ss.subject, min(ss.period) as period, min(ss.start_time) as start_time
+      from public.special_schedule ss
+      where ss.date = d
+      group by ss.subject
+    loop
       -- compute start time (use special.start_time if present; otherwise default by period)
       lesson_start_time := coalesce(rec.start_time, 
         case when rec.period = 1 then time '09:10:00'
@@ -74,9 +79,12 @@ begin
     end loop;
 
     -- weekly schedule for that weekday (only if no special_schedule exists for same period/date)
+    -- weekly schedules for that weekday: group by subject to avoid multiple reminders for consecutive periods
     for rec in 
-      select ws.* from public.weekly_schedule ws
+      select ws.subject, min(ws.period) as period, min(ws.start_time) as start_time
+      from public.weekly_schedule ws
       where ws.day_of_week = extract(dow from d)::int
+      group by ws.subject
     loop
       -- if a special_schedule exists for this date and same period, skip (special overrides weekly)
       if exists (select 1 from public.special_schedule ss where ss.date = d and ss.period = rec.period) then
